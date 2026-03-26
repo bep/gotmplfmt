@@ -3,6 +3,18 @@ package parse
 import "testing"
 
 func FuzzParseString(f *testing.F) {
+	samples := []string{
+		`{{}}`,
+		`{{.}}`,
+		`{{.Field}}`,
+		`<ul>{{ range . }}<li>{{.Field}}</li>{{ end }}</ul>`,
+		`{{.Field | printf "%q"}}`,
+		`{{if .}}yes{{else}}no{{end}}`,
+	}
+	for _, s := range samples {
+		f.Add(s)
+	}
+
 	f.Fuzz(func(t *testing.T, s string) {
 		root, err := Parse(s)
 		if err != nil {

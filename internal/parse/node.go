@@ -41,8 +41,10 @@ func (p Pos) Position() Pos {
 
 type printer struct {
 	*strings.Builder
-	prefix string
-	depth  int
+	prefix      string
+	depth       int
+	branchDepth int
+	branchBase  int // extra indent levels from whitespace context
 }
 
 func newPrinter() *printer {
@@ -53,7 +55,17 @@ func newPrinter() *printer {
 
 func (p *printer) WritePrefix() {
 	p.WriteString(p.prefix)
-	p.WriteString(strings.Repeat("\t", p.depth))
+	p.WriteString(strings.Repeat("  ", p.depth))
+}
+
+func (p *printer) writeBranchIndent() {
+	if p.branchDepth == 0 && p.branchBase == 0 {
+		return
+	}
+	s := p.String()
+	if len(s) == 0 || s[len(s)-1] == '\n' {
+		p.WriteString(strings.Repeat("  ", p.branchBase+p.branchDepth))
+	}
 }
 
 func lineno(n Node) int {
@@ -71,10 +83,7 @@ func whitespacePrefix(n Node, ltok string) (string, bool) {
 	txt := n.tree().text
 	pos := n.Position()
 	start := strings.LastIndex(txt[:pos], "\n")
-	if start < 0 {
-		// First line.
-		start = 0
-	}
+	// start is -1 on the first line; start+1 == 0 gives us the full prefix.
 	line := txt[start+1 : pos]
 	tokIdx := strings.LastIndex(line, ltok)
 	if tokIdx < 0 {
@@ -171,7 +180,33 @@ func (t *TextNode) String() string {
 }
 
 func (t *TextNode) writeTo(sb *printer) {
-	sb.WriteString(t.String())
+	lines := strings.Split(t.Text, "\n")
+	if sb.branchDepth == 0 {
+		// At root level, preserve first line but strip leading
+		// whitespace from subsequent lines to normalize indentation.
+		for i, line := range lines {
+			if i > 0 {
+				sb.WriteByte('\n')
+				sb.WriteString(strings.TrimLeft(line, " \t"))
+			} else {
+				sb.WriteString(line)
+			}
+		}
+		return
+	}
+	// Inside a template block: strip and re-indent based on depth.
+	for i, line := range lines {
+		if i > 0 {
+			sb.WriteByte('\n')
+			trimmed := strings.TrimLeft(line, " \t")
+			if trimmed != "" {
+				sb.WriteString(strings.Repeat("  ", sb.branchBase+sb.branchDepth))
+				sb.WriteString(trimmed)
+			}
+		} else {
+			sb.WriteString(line)
+		}
+	}
 }
 
 func (t *TextNode) tree() *Tree {
@@ -280,6 +315,7 @@ func (a *ActionNode) String() string {
 }
 
 func (a *ActionNode) writeTo(sb *printer) {
+	sb.writeBranchIndent()
 	w, ok := whitespacePrefix(a, "{{")
 	sb.prefix = w
 	sb.WriteString(a.Trim.leftDelim())
@@ -288,9 +324,11 @@ func (a *ActionNode) writeTo(sb *printer) {
 	a.Pipe.writeTo(sb)
 	sb.depth = 0
 	after := strings.Count(sb.String(), "\n")
-	if ok && before != after {
+	if before != after {
 		sb.WriteString("\n")
-		sb.WritePrefix()
+		if ok {
+			sb.WritePrefix()
+		}
 		sb.WriteString(a.Trim.rightDelimNoSpace())
 	} else {
 		sb.WriteString(a.Trim.rightDelim())
@@ -783,6 +821,7 @@ func (e *EndNode) String() string {
 }
 
 func (e *EndNode) writeTo(sb *printer) {
+	sb.writeBranchIndent()
 	sb.WriteString(e.Trim.leftDelim())
 	sb.WriteString("end")
 	sb.WriteString(e.Trim.rightDelim())
@@ -818,14 +857,20 @@ func (e *ElseNode) String() string {
 }
 
 func (e *ElseNode) writeTo(sb *printer) {
+	sb.writeBranchIndent()
 	sb.WriteString(e.Trim.leftDelim())
 	sb.WriteString("else")
 	if e.Pipe != nil {
-		sb.WriteString(" if ")
-		e.Pipe.writeTo(sb)
+		sb.WriteString(" if")
+		if len(e.Pipe.Cmds) > 0 {
+			sb.WriteByte(' ')
+			e.Pipe.writeTo(sb)
+		}
 	}
 	sb.WriteString(e.Trim.rightDelim())
+	sb.branchDepth++
 	e.List.writeTo(sb)
+	sb.branchDepth--
 }
 
 func (e *ElseNode) tree() *Tree {
@@ -853,16 +898,28 @@ func (b *BranchNode) String() string {
 }
 
 func (b *BranchNode) writeTo(sb *printer) {
+	prevBase := sb.branchBase
+	if sb.branchDepth == 0 {
+		if ws, ok := whitespacePrefix(b, "{{"); ok && len(ws) > 0 {
+			sb.branchBase = (len(ws) + 1) / 2 // round up to indent levels
+		}
+	}
+	sb.writeBranchIndent()
 	sb.WriteString(b.Trim.leftDelim())
 	sb.WriteString(b.Keyword)
-	sb.WriteByte(' ')
-	b.Pipe.writeTo(sb)
+	if len(b.Pipe.Cmds) > 0 {
+		sb.WriteByte(' ')
+		b.Pipe.writeTo(sb)
+	}
 	sb.WriteString(b.Trim.rightDelim())
+	sb.branchDepth++
 	b.List.writeTo(sb)
+	sb.branchDepth--
 	for _, e := range b.Elses {
 		e.writeTo(sb)
 	}
 	b.End.writeTo(sb)
+	sb.branchBase = prevBase
 }
 
 func (b *BranchNode) tree() *Tree {

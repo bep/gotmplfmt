@@ -64,6 +64,15 @@ func TestGolden(t *testing.T) {
 				if output != string(expected) {
 					t.Errorf("output does not match golden file.\nGot:\n%s\nExpected:\n%s", output, expected)
 				}
+
+				// Format output again to check for idempotency.
+				output2, err := Format(output)
+				if err != nil {
+					t.Fatalf("failed to format output again: %v", err)
+				}
+				if output != output2 {
+					t.Errorf("output is not idempotent.\nFirst format:\n%s\nSecond format:\n%s", output, output2)
+				}
 			}
 		})
 		return nil

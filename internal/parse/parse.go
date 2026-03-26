@@ -327,9 +327,9 @@ decls:
 }
 
 func (t *Tree) checkPipeline(pipe *PipeNode, context string) {
-	// Reject empty pipelines
+	// Allow empty pipelines — this is a formatter, not a validator.
 	if len(pipe.Cmds) == 0 {
-		t.errorf("missing value for %s", context)
+		return
 	}
 	// Only the first command of a pipeline can start with a non executable operand
 	for i, c := range pipe.Cmds[1:] {

@@ -1,0 +1,8 @@
+<ul>
+{{ range .Foo }}
+  {{ if eq . "bar" }}
+    {{ continue }}
+  {{ end }}
+  {{ printf "foo: %s" . }}
+{{ end }}
+</ul>

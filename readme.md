@@ -1,3 +1,11 @@
+
+
+* I have used [prettier-plugin-go-template](https://github.com/NiklasPor/prettier-plugin-go-template) for many years, to the formatting here is greatly influenced by that output.
+* Some notable differences:
+  * We don't auto-add trailing newlines; see [this issue](https://github.com/prettier/prettier/issues/13036) for some context.
+
+----
+
 This is an EXPERIMENTAL [Go template](https://pkg.go.dev/html/template) formatter.
 
 It is designed with HTML templates in mind, but it may later support other types of whitespace-insensitive templates.
