@@ -82,15 +82,15 @@ func lineno(n Node) int {
 func whitespacePrefix(n Node, ltok string) (string, bool) {
 	txt := n.tree().text
 	pos := n.Position()
-	start := strings.LastIndex(txt[:pos], "\n")
-	// start is -1 on the first line; start+1 == 0 gives us the full prefix.
-	line := txt[start+1 : pos]
-	tokIdx := strings.LastIndex(line, ltok)
-	if tokIdx < 0 {
-		// unexpected!
+	// Find the ltok (e.g. "{{") that precedes this node.
+	tokPos := strings.LastIndex(txt[:pos], ltok)
+	if tokPos < 0 {
 		return "", false
 	}
-	line = line[:tokIdx]
+	// Get the whitespace from the start of ltok's line to ltok.
+	start := strings.LastIndex(txt[:tokPos], "\n")
+	// start is -1 on the first line; start+1 == 0 gives us the full prefix.
+	line := txt[start+1 : tokPos]
 	w := int(leftTrimLength(line)) // length of whitespace
 	if w != len(line) {
 		return "", false
@@ -316,8 +316,21 @@ func (a *ActionNode) String() string {
 
 func (a *ActionNode) writeTo(sb *printer) {
 	sb.writeBranchIndent()
-	w, ok := whitespacePrefix(a, "{{")
-	sb.prefix = w
+	// Compute prefix from the builder output (what's on the current line
+	// before this action) rather than the original text, so that the prefix
+	// is stable across round trips even when text nodes strip whitespace.
+	s := sb.String()
+	lastNL := strings.LastIndexByte(s, '\n')
+	afterNL := s
+	if lastNL >= 0 {
+		afterNL = s[lastNL+1:]
+	}
+	ok := strings.TrimLeft(afterNL, " \t") == ""
+	if ok {
+		sb.prefix = afterNL
+	} else {
+		sb.prefix = ""
+	}
 	sb.WriteString(a.Trim.leftDelim())
 	before := strings.Count(sb.String(), "\n")
 	sb.depth = 1
