@@ -140,6 +140,20 @@ func (t *Tree) newList(pos Pos) *ListNode {
 	return &ListNode{tr: t, NodeType: NodeList, Pos: pos}
 }
 
+// HasIgnoreAll reports whether the first comment in the list is a gotmplfmt-ignore-all directive.
+func (l *ListNode) HasIgnoreAll() bool {
+	for _, n := range l.Nodes {
+		if c, ok := n.(*CommentNode); ok {
+			return strings.Contains(c.Text, "gotmplfmt-ignore-all")
+		}
+		if _, ok := n.(*TextNode); ok {
+			continue // skip leading text (whitespace/newlines)
+		}
+		break
+	}
+	return false
+}
+
 func (l *ListNode) append(n Node) {
 	l.Nodes = append(l.Nodes, n)
 }
