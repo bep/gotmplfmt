@@ -1,7 +1,7 @@
 package tmplfmt
 
 import (
-	"github.com/josharian/gotmplfmt/internal/parse"
+	"github.com/bep/gotmplfmt/internal/parse"
 )
 
 func Format(text string) (string, error) {

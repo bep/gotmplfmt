@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/josharian/gotmplfmt/tmplfmt"
+	"github.com/bep/gotmplfmt/tmplfmt"
 )
 
 func main() {
