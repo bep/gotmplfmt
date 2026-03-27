@@ -1,3 +1,3 @@
-module github.com/bep/gotmplfmt
+module github.com/gohugoio/gotmplfmt
 
 go 1.25

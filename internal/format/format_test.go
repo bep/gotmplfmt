@@ -1,4 +1,4 @@
-package tmplfmt
+package format
 
 import (
 	"flag"

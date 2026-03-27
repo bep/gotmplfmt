@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/bep/gotmplfmt/tmplfmt"
+	"github.com/gohugoio/gotmplfmt/internal/format"
 )
 
 func main() {
@@ -20,7 +20,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	out, err := tmplfmt.Format(string(buf))
+	out, err := format.Format(string(buf))
 	if err != nil {
 		log.Fatal(err)
 	}
