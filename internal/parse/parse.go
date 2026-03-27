@@ -236,7 +236,7 @@ func (t *Tree) textOrAction() (n Node) {
 		defer t.clearActionLine()
 		return t.action(token.trim)
 	case itemComment:
-		return t.newComment(token.pos, token.val)
+		return t.newComment(token.pos, token.val, token.trim)
 	default:
 		t.unexpected(token, "input")
 	}

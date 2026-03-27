@@ -72,6 +72,7 @@ type printer struct {
 	htmlDepth      int
 	inHTMLTag      bool // inside a '<' that hasn't been closed with '>'
 	htmlTagIsClose bool // the current incomplete tag is a closing tag
+	htmlTagIsVoid  bool // the current incomplete tag is a void element
 }
 
 func newPrinter() *printer {
@@ -128,7 +129,7 @@ func (p *printer) computeHTMLDeltas(text string) (pre, post int) {
 		if p.inHTMLTag {
 			if text[i] == '>' {
 				selfClose := i > 0 && text[i-1] == '/'
-				if selfClose {
+				if selfClose || p.htmlTagIsVoid {
 					// no depth change
 				} else if p.htmlTagIsClose {
 					delta--
@@ -139,6 +140,7 @@ func (p *printer) computeHTMLDeltas(text string) (pre, post int) {
 					delta++
 				}
 				p.inHTMLTag = false
+				p.htmlTagIsVoid = false
 			}
 			continue
 		}
@@ -167,9 +169,14 @@ func (p *printer) computeHTMLDeltas(text string) (pre, post int) {
 		if !p.htmlTagIsClose && nameEnd > nameStart {
 			if voidElements[strings.ToLower(text[nameStart:nameEnd])] {
 				if j := strings.IndexByte(text[i:], '>'); j >= 0 {
+					// Void element closed on the same line — no depth change.
 					i += j
+					p.inHTMLTag = false
+					continue
 				}
-				p.inHTMLTag = false
+				// Void element spans multiple lines; keep inHTMLTag open
+				// so attribute lines get extra indentation.
+				p.htmlTagIsVoid = true
 				continue
 			}
 		}
@@ -341,9 +348,16 @@ func (t *TextNode) writeTo(sb *printer) {
 			segments := sb.splitHTMLLine(trimmed)
 			for _, seg := range segments {
 				sb.WriteByte('\n')
+				wasInTag := sb.inHTMLTag
 				pre, post := sb.computeHTMLDeltas(seg)
 				sb.htmlDepth += pre
-				sb.WriteString(indent(sb.totalIndent()))
+				extra := 0
+				if wasInTag && sb.inHTMLTag {
+					// Continuation line inside a multiline HTML tag
+					// (e.g. attributes) — indent one level deeper.
+					extra = 1
+				}
+				sb.WriteString(indent(sb.totalIndent() + extra))
 				sb.WriteString(seg)
 				sb.htmlDepth += post
 			}
@@ -451,10 +465,11 @@ type CommentNode struct {
 	Pos
 	tr   *Tree
 	Text string // Comment text.
+	Trim trim   // Trim markers.
 }
 
-func (t *Tree) newComment(pos Pos, text string) *CommentNode {
-	return &CommentNode{tr: t, NodeType: NodeComment, Pos: pos, Text: text}
+func (t *Tree) newComment(pos Pos, text string, tr trim) *CommentNode {
+	return &CommentNode{tr: t, NodeType: NodeComment, Pos: pos, Text: text, Trim: tr}
 }
 
 func (c *CommentNode) String() string {
@@ -464,9 +479,18 @@ func (c *CommentNode) String() string {
 }
 
 func (c *CommentNode) writeTo(sb *printer) {
-	sb.WriteString("{{")
+	sb.writeBranchIndent()
+	if c.Trim.left {
+		sb.WriteString("{{- ")
+	} else {
+		sb.WriteString("{{")
+	}
 	sb.WriteString(c.Text)
-	sb.WriteString("}}")
+	if c.Trim.right {
+		sb.WriteString(" -}}")
+	} else {
+		sb.WriteString("}}")
+	}
 }
 
 func (c *CommentNode) tree() *Tree {

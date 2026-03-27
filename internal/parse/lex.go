@@ -93,7 +93,6 @@ const eof = -1
 // better with the space present anyway. For simplicity, only ASCII
 // does the job.
 const (
-	spaceChars    = " \t\r\n"  // These are the space characters defined by Go itself.
 	trimMarker    = '-'        // Attached to left/right delimiter, trims trailing spaces from preceding/following text.
 	trimMarkerLen = Pos(1 + 1) // marker plus space before or after
 )
@@ -103,15 +102,16 @@ type stateFn func(*lexer) stateFn
 
 // lexer holds the state of the scanner.
 type lexer struct {
-	input        string // the string being scanned
-	pos          Pos    // current position in the input
-	start        Pos    // start position of this item
-	atEOF        bool   // we have hit the end of input and returned eof
-	parenDepth   int    // nesting depth of ( ) exprs
-	line         int    // 1+number of newlines seen
-	startLine    int    // start line of this item
-	item         item   // item to return to parser
-	insideAction bool   // are we inside an action?
+	input           string // the string being scanned
+	pos             Pos    // current position in the input
+	start           Pos    // start position of this item
+	atEOF           bool   // we have hit the end of input and returned eof
+	parenDepth      int    // nesting depth of ( ) exprs
+	line            int    // 1+number of newlines seen
+	startLine       int    // start line of this item
+	item            item   // item to return to parser
+	insideAction    bool   // are we inside an action?
+	commentLeftTrim bool   // left trim marker seen before comment
 }
 
 // next returns the next rune in the input.
@@ -271,11 +271,6 @@ func (l *lexer) atRightDelim() (delim, trimSpaces bool) {
 	return false, false
 }
 
-// leftTrimLength returns the length of the spaces at the beginning of the string.
-func leftTrimLength(s string) Pos {
-	return Pos(len(s) - len(strings.TrimLeft(s, spaceChars)))
-}
-
 // lexLeftDelim scans the left delimiter, which is known to be present, possibly with a trim marker.
 // (The text to be trimmed has already been emitted.)
 func lexLeftDelim(l *lexer) stateFn {
@@ -286,6 +281,7 @@ func lexLeftDelim(l *lexer) stateFn {
 		afterMarker = trimMarkerLen
 	}
 	if strings.HasPrefix(l.input[l.pos+afterMarker:], leftComment) {
+		l.commentLeftTrim = trimSpace
 		l.pos += afterMarker
 		l.ignore()
 		return lexComment
@@ -312,13 +308,12 @@ func lexComment(l *lexer) stateFn {
 		return l.errorf("comment ends before closing delimiter")
 	}
 	i := l.thisItem(itemComment)
+	i.trim.left = l.commentLeftTrim
+	i.trim.right = trimSpace
 	if trimSpace {
 		l.pos += trimMarkerLen
 	}
 	l.pos += Pos(len(rightDelim))
-	if trimSpace {
-		l.pos += leftTrimLength(l.input[l.pos:])
-	}
 	l.ignore()
 	return l.emitItem(i)
 }
