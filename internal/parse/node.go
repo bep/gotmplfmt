@@ -1071,19 +1071,20 @@ func (e *EndNode) tree() *Tree {
 	return e.tr
 }
 
-// ElseNode represents an {{else}} or {{else if}} action. Does not appear in the final tree.
+// ElseNode represents an {{else}}, {{else if}}, or {{else with}} action. Does not appear in the final tree.
 type ElseNode struct {
 	NodeType
 	Pos
-	tr   *Tree
-	Pipe *PipeNode // guard check, may be nil for bare {{ else }}
-	List *ListNode // stuff to execute if pipe holds
-	Line int       // The line number in the input. Deprecated: Kept for compatibility.
-	Trim trim
+	tr      *Tree
+	Keyword string    // "if" or "with"; empty for bare {{ else }}
+	Pipe    *PipeNode // guard check, may be nil for bare {{ else }}
+	List    *ListNode // stuff to execute if pipe holds
+	Line    int       // The line number in the input. Deprecated: Kept for compatibility.
+	Trim    trim
 }
 
-func (t *Tree) newElse(pos Pos, line int, pipe *PipeNode, trim trim) *ElseNode {
-	return &ElseNode{tr: t, NodeType: nodeElse, Pos: pos, Line: line, Pipe: pipe, Trim: trim}
+func (t *Tree) newElse(pos Pos, line int, keyword string, pipe *PipeNode, trim trim) *ElseNode {
+	return &ElseNode{tr: t, NodeType: nodeElse, Pos: pos, Line: line, Keyword: keyword, Pipe: pipe, Trim: trim}
 }
 
 func (e *ElseNode) Type() NodeType {
@@ -1101,7 +1102,8 @@ func (e *ElseNode) writeTo(sb *printer) {
 	sb.WriteString(e.Trim.leftDelim())
 	sb.WriteString("else")
 	if e.Pipe != nil {
-		sb.WriteString(" if")
+		sb.WriteString(" ")
+		sb.WriteString(e.Keyword)
 		if len(e.Pipe.Cmds) > 0 {
 			sb.WriteByte(' ')
 			e.Pipe.writeTo(sb)

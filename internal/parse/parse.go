@@ -393,17 +393,19 @@ func (t *Tree) endControl(trim trim) Node {
 func (t *Tree) elseControl(trim trim) Node {
 	var token item
 	var pipe *PipeNode
+	var keyword string
 	peek := t.peekNonSpace()
-	if peek.typ == itemIf {
-		token = t.next() // Consume the "if" token.
+	if peek.typ == itemIf || peek.typ == itemBranch {
+		keyword = peek.val
+		token = t.next() // Consume the "if"/"with"/etc. token.
 		var eoptok item
-		pipe, eoptok = t.pipeline("else if", itemRightDelim)
+		pipe, eoptok = t.pipeline("else "+keyword, itemRightDelim)
 		trim.right = eoptok.trim.right
 	} else {
 		token = t.expect(itemRightDelim, "else")
 		trim.right = token.trim.right
 	}
-	return t.newElse(token.pos, token.line, pipe, trim)
+	return t.newElse(token.pos, token.line, keyword, pipe, trim)
 }
 
 // command:
