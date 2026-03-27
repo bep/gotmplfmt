@@ -319,16 +319,21 @@ func (t *TextNode) writeTo(sb *printer) {
 			}
 			// Strip trailing whitespace from the last line of the TextNode,
 			// which sits between content and the next template action.
-			// Preserve a trailing space after '{' to avoid creating '{{{'.
+			// Preserve a trailing space when it looks like inline content
+			// spacing (e.g. "* {{ .Name }}") rather than indentation
+			// between tags and actions (e.g. "</ul>\t\t{{ end }}").
 			if i == len(lines)-1 {
 				t := strings.TrimRight(trimmed, " \t")
 				if t == "" {
 					continue
 				}
-				if t[len(t)-1] == '{' {
-					trimmed = t + " "
-				} else {
+				tail := trimmed[len(t):]
+				if strings.ContainsRune(tail, '\t') {
+					// Tabs signal indentation — strip entirely.
 					trimmed = t
+				} else if len(tail) > 0 {
+					// Space-only tail — preserve a single space.
+					trimmed = t + " "
 				}
 			}
 			// Split the line at tag boundaries where depth drops,
@@ -563,13 +568,22 @@ func (a *ActionNode) writeTo(sb *printer) {
 	sb.depth = 1
 	a.Pipe.writeTo(sb)
 	sb.depth = 0
-	after := strings.Count(sb.String(), "\n")
+	cur := sb.String()
+	after := strings.Count(cur, "\n")
 	if before != after {
-		sb.WriteString("\n")
-		if ok {
-			sb.WritePrefix()
+		// The pipe spans multiple lines. Put the closing delimiter on
+		// its own line, unless the multiline content comes from a raw
+		// string literal (ending with a backtick) — in that case keep
+		// the closing delimiter on the same line.
+		if cur[len(cur)-1] != '`' {
+			sb.WriteString("\n")
+			if ok {
+				sb.WritePrefix()
+			}
+			sb.WriteString(a.Trim.rightDelimNoSpace())
+		} else {
+			sb.WriteString(a.Trim.rightDelim())
 		}
-		sb.WriteString(a.Trim.rightDelimNoSpace())
 	} else {
 		sb.WriteString(a.Trim.rightDelim())
 	}

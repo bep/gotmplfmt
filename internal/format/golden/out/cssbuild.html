@@ -1,0 +1,17 @@
+{{ with resources.Get "css/main.css" }}
+	{{ $opts := dict
+		"loaders" (dict ".png" "dataurl" ".svg" "dataurl")
+		"minify" (cond hugo.IsDevelopment false true)
+		"sourceMap" (cond hugo.IsDevelopment "linked" "none")
+		"target" (slice "chrome115" "edge115" "firefox116" "ios16.4" "opera101" "safari16.4")
+	}}
+	{{ with . | css.Build $opts }}
+		{{ if hugo.IsDevelopment }}
+			<link rel="stylesheet" href="{{ .RelPermalink }}">
+		{{ else }}
+			{{ with . | fingerprint }}
+				<link rel="stylesheet" href="{{ .RelPermalink }}" integrity="{{ .Data.Integrity }}" crossorigin="anonymous">
+			{{ end }}
+		{{ end }}
+	{{ end }}
+{{ end }}

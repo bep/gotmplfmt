@@ -2,6 +2,7 @@ package format
 
 import (
 	"flag"
+	"html/template"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -48,6 +49,9 @@ func TestGolden(t *testing.T) {
 				t.Fatalf("failed to read input file: %v", err)
 			}
 
+			// We may add some invalid test cases later, but for now assume all input files are valid Go text templates and try parsing them before formatting.
+			tryParseGoTextTemplate(t, string(input))
+
 			output, err := Format(string(input))
 			if err != nil {
 				t.Fatalf("failed to format template: %v", err)
@@ -76,10 +80,35 @@ func TestGolden(t *testing.T) {
 				if output != output2 {
 					t.Errorf("output is not idempotent.\nFirst format:\n%s\nSecond format:\n%s", output, output2)
 				}
+
+				// Try parsing the output with Go's text/template to ensure it's valid.
+				tryParseGoTextTemplate(t, output)
 			}
 		})
 		return nil
 	}); err != nil {
 		t.Fatalf("failed to walk golden/in: %v", err)
+	}
+}
+
+func tryParseGoTextTemplate(t *testing.T, text string) {
+	// Needed for validation.
+	fn := func() string {
+		return "test"
+	}
+	funcMap := template.FuncMap{
+		"cond":        fn,
+		"css":         fn,
+		"dict":        fn,
+		"hugo":        fn,
+		"js":          fn,
+		"resources":   fn,
+		"site":        fn,
+		"fingerprint": fn,
+	}
+
+	_, err := template.New("").Funcs(funcMap).Parse(text)
+	if err != nil {
+		t.Fatal("Error parsing template:", err)
 	}
 }
