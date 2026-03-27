@@ -23,7 +23,7 @@ func FuzzParseString(f *testing.F) {
 		out := root.String()
 		root2, err := Parse(out)
 		if err != nil {
-			t.Fatal(err)
+			t.Fatalf("failed to parse output: %v", err)
 		}
 		out2 := root2.String()
 		if out != out2 {

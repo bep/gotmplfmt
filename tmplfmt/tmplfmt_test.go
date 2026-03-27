@@ -12,7 +12,6 @@ import (
 // To update the golden files, set writeOutput to true and run `go test -update`.
 var (
 	update = flag.Bool("update", false, "update the golden files")
-	copy   = flag.Bool("copy", false, "copy golden files from in to out")
 )
 
 func TestGolden(t *testing.T) {
@@ -23,6 +22,16 @@ func TestGolden(t *testing.T) {
 	goldenDir := "golden"
 	goldenDirIn := filepath.Join(goldenDir, "in")
 	goldenDirOut := filepath.Join(goldenDir, "out")
+
+	if *update {
+		// Remove existing golden files.
+		if err := os.RemoveAll(goldenDirOut); err != nil {
+			t.Fatalf("failed to remove existing golden output directory: %v", err)
+		}
+		if err := os.MkdirAll(goldenDirOut, 0o755); err != nil {
+			t.Fatalf("failed to create golden output directory: %v", err)
+		}
+	}
 
 	// Read golden/in.
 	if err := filepath.Walk(goldenDirIn, func(path string, info fs.FileInfo, err error) error {
@@ -38,19 +47,13 @@ func TestGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to read input file: %v", err)
 			}
-			goldenPath := filepath.Join(goldenDirOut, baseName)
-			if *copy {
-				if err := os.WriteFile(goldenPath, input, 0o644); err != nil {
-					t.Fatalf("failed to copy golden file: %v", err)
-				}
-				t.Logf("Copied %s to %s", path, goldenPath)
-				// Done
-				return
-			}
+
 			output, err := Format(string(input))
 			if err != nil {
 				t.Fatalf("failed to format template: %v", err)
 			}
+
+			goldenPath := filepath.Join(goldenDirOut, baseName)
 
 			if *update {
 				if err := os.WriteFile(goldenPath, []byte(output), 0o644); err != nil {

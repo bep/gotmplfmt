@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+	<body>
+		<main>
+			{{ block "main" . }}
+				<ul>
+					{{ range .Pages }}
+						<li>
+							{{ template "link" . }}
+						</li>
+					{{ end }}
+				</ul>
+			{{ end }}
+		</main>
+	</body>
+</html>
+
+{{ define "link" }}
+	<a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a>
+{{ end }}

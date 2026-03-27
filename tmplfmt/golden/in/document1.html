@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<body>
+<ul>
+{{ range .Pages }}
+<li>
+<a href="{{ .RelPermalink }}">{{ .LinkTitle }}</a>
+</li>
+{{ end }}
+</ul>
+</body>
+</html>

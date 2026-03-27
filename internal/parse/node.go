@@ -67,7 +67,11 @@ type printer struct {
 	prefix      string
 	depth       int
 	branchDepth int
-	branchBase  int // extra indent levels from whitespace context
+
+	// HTML-aware indentation state.
+	htmlDepth      int
+	inHTMLTag      bool // inside a '<' that hasn't been closed with '>'
+	htmlTagIsClose bool // the current incomplete tag is a closing tag
 }
 
 func newPrinter() *printer {
@@ -76,19 +80,112 @@ func newPrinter() *printer {
 	}
 }
 
+// totalIndent returns the combined HTML + template nesting depth.
+func (p *printer) totalIndent() int {
+	n := p.htmlDepth + p.branchDepth
+	if n < 0 {
+		return 0
+	}
+	return n
+}
+
 func (p *printer) WritePrefix() {
 	p.WriteString(p.prefix)
 	p.WriteString(indent(p.depth))
 }
 
 func (p *printer) writeBranchIndent() {
-	if p.branchDepth == 0 && p.branchBase == 0 {
+	if p.totalIndent() == 0 {
 		return
 	}
 	s := p.String()
 	if len(s) == 0 || s[len(s)-1] == '\n' {
-		p.WriteString(indent(p.branchBase + p.branchDepth))
+		p.WriteString(indent(p.totalIndent()))
 	}
+}
+
+// writeControlIndent is like writeBranchIndent but forces a newline if the
+// output doesn't already end with one. Used for template control structures
+// (end, else, if, range, etc.) which must always start on their own line.
+func (p *printer) writeControlIndent() {
+	s := p.String()
+	if len(s) > 0 && s[len(s)-1] != '\n' {
+		p.WriteByte('\n')
+	}
+	if p.totalIndent() > 0 {
+		p.WriteString(indent(p.totalIndent()))
+	}
+}
+
+// computeHTMLDeltas scans text for HTML tags, updates the printer's tag-tracking
+// state (for tags split across TextNodes), and returns depth adjustments:
+//   - pre: depth change to apply BEFORE indenting (from leading closing tags)
+//   - post: depth change to apply AFTER indenting (from opening tags)
+func (p *printer) computeHTMLDeltas(text string) (pre, post int) {
+	delta := 0
+	minDelta := 0
+	for i := 0; i < len(text); i++ {
+		if p.inHTMLTag {
+			if text[i] == '>' {
+				selfClose := i > 0 && text[i-1] == '/'
+				if selfClose {
+					// no depth change
+				} else if p.htmlTagIsClose {
+					delta--
+					if delta < minDelta {
+						minDelta = delta
+					}
+				} else {
+					delta++
+				}
+				p.inHTMLTag = false
+			}
+			continue
+		}
+		if text[i] != '<' || i+1 >= len(text) {
+			continue
+		}
+		next := text[i+1]
+		// Skip doctype, comments, processing instructions.
+		if next == '!' || next == '?' {
+			if j := strings.IndexByte(text[i:], '>'); j >= 0 {
+				i += j
+			}
+			continue
+		}
+		p.inHTMLTag = true
+		p.htmlTagIsClose = next == '/'
+		// Extract tag name for void element check.
+		nameStart := i + 1
+		if p.htmlTagIsClose {
+			nameStart = i + 2
+		}
+		nameEnd := nameStart
+		for nameEnd < len(text) && isTagNameChar(text[nameEnd]) {
+			nameEnd++
+		}
+		if !p.htmlTagIsClose && nameEnd > nameStart {
+			if voidElements[strings.ToLower(text[nameStart:nameEnd])] {
+				if j := strings.IndexByte(text[i:], '>'); j >= 0 {
+					i += j
+				}
+				p.inHTMLTag = false
+				continue
+			}
+		}
+	}
+	return minDelta, delta - minDelta
+}
+
+func isTagNameChar(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-'
+}
+
+var voidElements = map[string]bool{
+	"area": true, "base": true, "br": true, "col": true,
+	"embed": true, "hr": true, "img": true, "input": true,
+	"link": true, "meta": true, "param": true, "source": true,
+	"track": true, "wbr": true,
 }
 
 func lineno(n Node) int {
@@ -97,29 +194,6 @@ func lineno(n Node) int {
 	return strings.Count(n.tree().text[:n.Position()], "\n")
 }
 
-// whitespacePrefix returns the exact whitespace from the beginning of n's line to n.
-// start is the token that starts n, e.g. "{{" or "(".
-// If there is any non-whitespace, it returns "", false.
-// For example, for a line that begins "\t\t{{ " it will return "\t\t", true,
-// but "\tx\t{{ " will yield "", false.
-func whitespacePrefix(n Node, ltok string) (string, bool) {
-	txt := n.tree().text
-	pos := n.Position()
-	// Find the ltok (e.g. "{{") that precedes this node.
-	tokPos := strings.LastIndex(txt[:pos], ltok)
-	if tokPos < 0 {
-		return "", false
-	}
-	// Get the whitespace from the start of ltok's line to ltok.
-	start := strings.LastIndex(txt[:tokPos], "\n")
-	// start is -1 on the first line; start+1 == 0 gives us the full prefix.
-	line := txt[start+1 : tokPos]
-	w := int(leftTrimLength(line)) // length of whitespace
-	if w != len(line) {
-		return "", false
-	}
-	return line, true
-}
 
 // Type returns itself and provides an easy default implementation
 // for embedding in a Node. Embedded in all non-trivial Nodes.
@@ -237,32 +311,116 @@ func (t *TextNode) String() string {
 
 func (t *TextNode) writeTo(sb *printer) {
 	lines := strings.Split(t.Text, "\n")
-	if sb.branchDepth == 0 {
-		// At root level, preserve first line but strip leading
-		// whitespace from subsequent lines to normalize indentation.
-		for i, line := range lines {
-			if i > 0 {
-				sb.WriteByte('\n')
-				sb.WriteString(strings.TrimLeft(line, " \t"))
-			} else {
-				sb.WriteString(line)
-			}
-		}
-		return
-	}
-	// Inside a template block: strip and re-indent based on depth.
 	for i, line := range lines {
 		if i > 0 {
-			sb.WriteByte('\n')
-			trimmed := strings.TrimLeft(line, " \t")
-			if trimmed != "" {
-				sb.WriteString(indent(sb.branchBase + sb.branchDepth))
-				sb.WriteString(trimmed)
+			trimmed := strings.Trim(line, " \t")
+			if trimmed == "" {
+				sb.WriteByte('\n')
+				continue
+			}
+			// Split the line at tag boundaries where depth drops,
+			// so closing tags that end a nesting level get their own line.
+			segments := sb.splitHTMLLine(trimmed)
+			for _, seg := range segments {
+				sb.WriteByte('\n')
+				pre, post := sb.computeHTMLDeltas(seg)
+				sb.htmlDepth += pre
+				sb.WriteString(indent(sb.totalIndent()))
+				sb.WriteString(seg)
+				sb.htmlDepth += post
 			}
 		} else {
+			// First line continues on the same line as the previous node.
+			// Tags affect depth for subsequent lines but no indent is written.
+			pre, post := sb.computeHTMLDeltas(line)
+			sb.htmlDepth += pre + post
 			sb.WriteString(line)
 		}
 	}
+}
+
+// splitHTMLLine splits a line into segments where a closing tag would decrease
+// depth below the line's starting depth. For example, "<div></div></div>" becomes
+// ["<div></div>", "</div>"] because the second </div> closes a tag from a previous line.
+func (p *printer) splitHTMLLine(line string) []string {
+	// Save tag state — we're peeking ahead, not consuming.
+	savedInTag := p.inHTMLTag
+	savedIsClose := p.htmlTagIsClose
+
+	depth := 0
+	var splits []int
+	for i := 0; i < len(line); i++ {
+		if p.inHTMLTag {
+			if line[i] == '>' {
+				selfClose := i > 0 && line[i-1] == '/'
+				if selfClose {
+					// no depth change
+				} else if p.htmlTagIsClose {
+					depth--
+				} else {
+					depth++
+				}
+				p.inHTMLTag = false
+				// If depth dropped below 0 after this tag, split before the '<' of this tag.
+				if depth < 0 {
+					// Find the '<' that started this tag by scanning back.
+					lt := strings.LastIndex(line[:i], "<")
+					if lt >= 0 && (len(splits) == 0 || lt > splits[len(splits)-1]) {
+						splits = append(splits, lt)
+					}
+					depth = 0 // reset for next segment
+				}
+			}
+			continue
+		}
+		if line[i] != '<' || i+1 >= len(line) {
+			continue
+		}
+		next := line[i+1]
+		if next == '!' || next == '?' {
+			if j := strings.IndexByte(line[i:], '>'); j >= 0 {
+				i += j
+			}
+			continue
+		}
+		p.inHTMLTag = true
+		p.htmlTagIsClose = next == '/'
+		nameStart := i + 1
+		if p.htmlTagIsClose {
+			nameStart = i + 2
+		}
+		nameEnd := nameStart
+		for nameEnd < len(line) && isTagNameChar(line[nameEnd]) {
+			nameEnd++
+		}
+		if !p.htmlTagIsClose && nameEnd > nameStart {
+			if voidElements[strings.ToLower(line[nameStart:nameEnd])] {
+				if j := strings.IndexByte(line[i:], '>'); j >= 0 {
+					i += j
+				}
+				p.inHTMLTag = false
+				continue
+			}
+		}
+	}
+
+	// Restore tag state — computeHTMLDeltas will process the actual segments.
+	p.inHTMLTag = savedInTag
+	p.htmlTagIsClose = savedIsClose
+
+	if len(splits) == 0 {
+		return []string{line}
+	}
+	var segments []string
+	start := 0
+	for _, pos := range splits {
+		if pos > start {
+			segments = append(segments, line[start:pos])
+		}
+		start = pos
+	}
+	segments = append(segments, line[start:])
+	return segments
 }
 
 func (t *TextNode) tree() *Tree {
@@ -890,7 +1048,7 @@ func (e *EndNode) String() string {
 }
 
 func (e *EndNode) writeTo(sb *printer) {
-	sb.writeBranchIndent()
+	sb.writeControlIndent()
 	sb.WriteString(e.Trim.leftDelim())
 	sb.WriteString("end")
 	sb.WriteString(e.Trim.rightDelim())
@@ -926,7 +1084,7 @@ func (e *ElseNode) String() string {
 }
 
 func (e *ElseNode) writeTo(sb *printer) {
-	sb.writeBranchIndent()
+	sb.writeControlIndent()
 	sb.WriteString(e.Trim.leftDelim())
 	sb.WriteString("else")
 	if e.Pipe != nil {
@@ -967,13 +1125,7 @@ func (b *BranchNode) String() string {
 }
 
 func (b *BranchNode) writeTo(sb *printer) {
-	prevBase := sb.branchBase
-	if sb.branchDepth == 0 {
-		if ws, ok := whitespacePrefix(b, "{{"); ok && len(ws) > 0 {
-			sb.branchBase = strings.Count(ws, "\t") // count tab indent levels
-		}
-	}
-	sb.writeBranchIndent()
+	sb.writeControlIndent()
 	sb.WriteString(b.Trim.leftDelim())
 	sb.WriteString(b.Keyword)
 	if len(b.Pipe.Cmds) > 0 {
@@ -988,7 +1140,6 @@ func (b *BranchNode) writeTo(sb *printer) {
 		e.writeTo(sb)
 	}
 	b.End.writeTo(sb)
-	sb.branchBase = prevBase
 }
 
 func (b *BranchNode) tree() *Tree {
