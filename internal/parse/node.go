@@ -351,6 +351,9 @@ func (t *TextNode) writeTo(sb *printer) {
 				wasInTag := sb.inHTMLTag
 				pre, post := sb.computeHTMLDeltas(seg)
 				sb.htmlDepth += pre
+				if sb.htmlDepth < 0 {
+					sb.htmlDepth = 0
+				}
 				extra := 0
 				if wasInTag && sb.inHTMLTag {
 					// Continuation line inside a multiline HTML tag
@@ -360,12 +363,18 @@ func (t *TextNode) writeTo(sb *printer) {
 				sb.WriteString(indent(sb.totalIndent() + extra))
 				sb.WriteString(seg)
 				sb.htmlDepth += post
+				if sb.htmlDepth < 0 {
+					sb.htmlDepth = 0
+				}
 			}
 		} else {
 			// First line continues on the same line as the previous node.
 			// Tags affect depth for subsequent lines but no indent is written.
 			pre, post := sb.computeHTMLDeltas(line)
 			sb.htmlDepth += pre + post
+			if sb.htmlDepth < 0 {
+				sb.htmlDepth = 0
+			}
 			sb.WriteString(line)
 		}
 	}
@@ -1148,9 +1157,11 @@ func (e *ElseNode) writeTo(sb *printer) {
 		}
 	}
 	sb.WriteString(e.Trim.rightDelim())
+	savedHTMLDepth := sb.htmlDepth
 	sb.branchDepth++
 	e.List.writeTo(sb)
 	sb.branchDepth--
+	sb.htmlDepth = savedHTMLDepth
 }
 
 func (e *ElseNode) tree() *Tree {
@@ -1186,12 +1197,15 @@ func (b *BranchNode) writeTo(sb *printer) {
 		b.Pipe.writeTo(sb)
 	}
 	sb.WriteString(b.Trim.rightDelim())
+	savedHTMLDepth := sb.htmlDepth
 	sb.branchDepth++
 	b.List.writeTo(sb)
 	sb.branchDepth--
 	for _, e := range b.Elses {
+		sb.htmlDepth = savedHTMLDepth
 		e.writeTo(sb)
 	}
+	sb.htmlDepth = savedHTMLDepth
 	b.End.writeTo(sb)
 }
 
